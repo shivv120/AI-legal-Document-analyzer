@@ -1,33 +1,33 @@
 from flask import Flask, render_template, request
 import os
 from werkzeug.utils import secure_filename
-
+from googletrans import Translator
 from docx import Document
 from PIL import Image
 import pytesseract
 from pdf2image import convert_from_path
-import easyocr
 import cv2
 import numpy as np
 
 app = Flask(__name__)
 
-pytesseract.pytesseract.tesseract_cmd = r'Add you path'
-poppler_path = r"#add your path"
-easyocr_reader = easyocr.Reader(['en', 'hi', 'mr'])  # For fallback if needed
+# Configuration
+pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+poppler_path = r"C:\Users\Shivashankar\Downloads\Release-24.08.0-0\poppler-24.08.0\Library\bin"
 
 ALLOWED_EXTENSIONS = {'pdf', 'docx', 'jpg', 'jpeg', 'png'}
+translator = Translator()
 
+# Utility Functions
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def preprocess_with_opencv(image_path):
-    """Preprocess image using OpenCV for better OCR results."""
     img = cv2.imread(image_path)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    _, thresh = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV)
-    pil_img = Image.fromarray(thresh)
-    return pil_img
+    blur = cv2.GaussianBlur(gray, (3, 3), 0)
+    _, thresh = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    return Image.fromarray(thresh)
 
 def extract_text(filepath, extension):
     extension = extension.lower()
@@ -35,8 +35,7 @@ def extract_text(filepath, extension):
     if extension in ['.jpg', '.jpeg', '.png']:
         try:
             pil_img = preprocess_with_opencv(filepath)
-            result = pytesseract.image_to_string(pil_img, lang='hin+mar')
-            return result
+            return pytesseract.image_to_string(pil_img, lang='hin+mar+eng')
         except Exception as e:
             return f"Failed to extract text from image. Error: {str(e)}"
 
@@ -45,11 +44,10 @@ def extract_text(filepath, extension):
             images = convert_from_path(filepath, poppler_path=poppler_path)
             all_text = []
             for idx, image in enumerate(images):
-                # Convert PDF page image to OpenCV format and preprocess
                 temp_image_path = f"temp_page_{idx}.png"
                 image.save(temp_image_path)
                 pil_img = preprocess_with_opencv(temp_image_path)
-                text = pytesseract.image_to_string(pil_img, lang='eng+hin+mar')
+                text = pytesseract.image_to_string(pil_img, lang='hin+mar+eng')
                 all_text.append(text)
                 os.remove(temp_image_path)
             return '\n'.join(all_text)
@@ -65,6 +63,27 @@ def extract_text(filepath, extension):
 
     return "Unsupported file type."
 
+def translate_text_line_by_line(text):
+    translated_lines = []
+    for line in text.split('\n'):
+        if line.strip():
+            try:
+                detected = translator.detect(line)
+                if detected.lang in ['hi', 'mr']:
+                    translated = translator.translate(line, src=detected.lang, dest='en').text
+                    translated_lines.append(f"{line}\n→ {translated}")
+                else:
+                    translated_lines.append(line)
+            except Exception as e:
+                translated_lines.append(f"{line}\n[Translation failed: {str(e)}]")
+        else:
+            translated_lines.append("")
+    return '\n'.join(translated_lines)
+
+def wrap_text(text, width=100):
+    return '\n'.join([text[i:i+width] for i in range(0, len(text), width)])
+
+# Flask Routes
 @app.route('/')
 def index():
     return render_template('template.html')
@@ -79,7 +98,6 @@ def upload_file():
         return "No file selected", 400
 
     os.makedirs('uploads', exist_ok=True)
-
     combined_text = ""
 
     for file in files:
@@ -89,10 +107,10 @@ def upload_file():
             file.save(filepath)
 
             extension = os.path.splitext(filename)[1].lower()
-            extracted_text = extract_text(filepath, extension)
-            
-            # Break lines at 100 characters for better readability
-            formatted_text = '\n'.join([extracted_text[i:i+100] for i in range(0, len(extracted_text), 100)])
+            raw_text = extract_text(filepath, extension)
+            translated_text = translate_text_line_by_line(raw_text)
+            formatted_text = wrap_text(translated_text, 100)
+
             combined_text += f"\n\n=== Text from {filename} ===\n{formatted_text}"
 
     if not combined_text.strip():
