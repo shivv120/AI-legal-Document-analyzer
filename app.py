@@ -13,7 +13,7 @@ app = Flask(__name__)
 
 # Configuration
 pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-poppler_path = r"C:\Users\Shivashankar\Downloads\Release-24.08.0-0\poppler-24.08.0\Library\bin"
+poppler_path = r'Release-24.08.0-0\poppler-24.08.0\Library\bin"
 
 ALLOWED_EXTENSIONS = {'pdf', 'docx', 'jpg', 'jpeg', 'png'}
 translator = Translator()
